@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width"/>
+
+        <title>MyChess</title>
+        <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+        <style>
+            .board{
+                width: 800px;
+                height: 800px;
+                position: relative;
+            }
+            .tile{
+                width: 100px;
+                height: 100px;
+                border: none;
+                position: absolute;
+            }
+            .unit{
+                width: 100px;
+                height: 100px;
+                border: none;
+                position: absolute;
+            }
+            .moveTile{
+                width: 100px;
+                height: 100px;
+                border: none;
+                position: absolute;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="app">
+            <span>현재 차례 : {{turn ? "black" : "white"}}</span><br>
+            <span>현재 모드 : {{mode}}</span><br>
+            <sapn>TurnCounter : {{turnCounter}}</sapn>
+            <div class="board">
+                <div class="tile" v-for="i in 64" :style="tileStyle(i-1)">
+                </div>
+                <div class="unit" v-for="u in unit" v-if="u.alive" :style="unitStyle(u)" @click="unitClicked(u)"></div>
+                <div class="moveTile" v-for="i in 64" :style="moveTileStyle(i-1)" @click="moveTileClicked(i-1)" v-if="mode == 'unitselected'"></div>
+            </div>
+            <hr>
+            <button class="undo" @click="undo">뒤로가기</button>
+            <button class="redo" @click="redo">앞으로가기</button>
+        </div>
+    </body>
+    <script src="unit.js"></script>
+    <script>
+        const vm = new Vue({
+            el: '#app',
+            data:{
+                undoStack : [],
+                redoStack : [],
+
+                activeX : 0,
+                activeY : 0,
+
+                mode : 'base',
+                turn : 0,
+                turnCounter : 1,
+
+                tile : [],
+                tileWidth : 100,
+                tileHeight : 100,
+
+                unit : [],
+
+                moveTile : [],
+                canGoList : null
+            },
+            created() {
+                console.log("게임판을 생성합니다.");
+                // tile setting
+                console.log("타일을 생성합니다.");
+                for(let i=0;i<64;++i){
+                    this.tile.push([]);
+                    for(let j=0;j<8;++j){
+                        this.tile[i].push({activate : false})
+                    }
+                }
+                // unit setting
+                let names = ["Rook","Knight","Bishop","Queen","King","Bishop","Knight","Rook"];
+                // 0 team unit create
+                console.log("white unit 을 생성합니다.");
+                for(let i=0;i<8;++i)
+                    this.unit.push(new Unit(6,i,0,'Pawn'));
+                for(let i=0;i<8;++i)
+                    this.unit.push(new Unit(7,i,0,'Pawn'));
+                // 1 team unit create
+                console.log("black unit 을 생성합니다.");
+                for(let i=0;i<8;++i)
+                    this.unit.push(new Unit(1,i,1,'Pawn'));
+                for(let i=0;i<8;++i)
+                    this.unit.push(new Unit(0,i,1,'Pawn'));
+                
+                // moveTile setting
+                for(let i=0;i<64;++i){
+                        this.moveTile.push({y:Math.floor(i/8),x:i%8,canGo:false});
+                }
+            },
+            methods: {
+                tileStyle(i){
+                    let y = Math.floor(i/8);
+                    let x = i%8;
+
+                    let backgroundColor = '';
+                    let top = this.tileHeight*y + 'px';
+                    let left = this.tileWidth*x + 'px';
+
+                    if((y+x)%2){
+                        if(this.tile[y][x].activate) backgroundColor = 'rgb(186,202,43)';
+                        else backgroundColor='rgb(118,150,86)';
+                    }else{
+                        if(this.tile[y][x].activate) backgroundColor = 'rgb(246,246,105)';
+                        else backgroundColor='rgb(238,238,210)';
+                    }
+                    return{
+                        backgroundColor,
+                        top,
+                        left
+                    };
+                },
+
+                unitStyle(u){
+                    let top = this.tileHeight*u.y + 'px';
+                    let left = this.tileWidth*u.x + 'px';
+                    let backgroundImage = 'url("./' + u.name + (u.team? 1 : 0) + '.png")';
+                    return{
+                        top,
+                        left,
+                        backgroundImage
+                    }
+                },
+                unitClicked(u){
+                    if(this.mode !='base' || this.turn != u.team) return;
+                    
+                    let boardInfo = [];
+                    for(let y=0;y<8;++y){
+                        boardInfo.push([]);
+                        for(let x=0;x<8;++x)
+                            boardInfo[y].push({empty: true});
+                    }
+
+                    for(let i=0;i<this.unit.length;++i) if(this.unit[i].alive){
+                        let u = this.unit[i];
+                        boardInfo[u.y][u.x].empty = false;
+                        boardInfo[u.y][u.x].team = u.team;
+                        boardInfo[u.y][u.x].lastmovedTurn = u.lastmovedTurn;
+                        boardInfo[u.y][u.x].name = u.name;
+                    }
+
+                    this.canGoList = u.canGo(boardInfo,this.turnCounter);
+                    for(let i=0;i<this.canGoList.length;++i){
+                        this.moveTile[this.canGoList[i].y*8 + this.canGoList[i].x].canGo = true;
+                    }
+
+                    this.mode = 'unitselected';
+                    this.tile[u.y][u.x].activate = true;
+                    this.activeX = u.x;
+                    this.activeY = u.y;
+                },
+
+                moveTileStyle(i){
+                    let t = this.moveTile[i];
+                    let top = this.tileHeight*t.y + 'px';
+                    let left = this.tileWidth*t.x + 'px';
+                    let backgroundImage = 'url("./moveTile' + (t.canGo? 1: 0) + '.png")';
+                    return{
+                        top,
+                        left,
+                        backgroundImage
+                    }
+                },
+                moveTileClicked(i){
+                    
+                    if(this.mode != 'unitselected') return;
+                    // 갈 수 없는 곳을 클릭하면, mode 를 다시 base 로 바꾸고 canGo 를 초기화 한다.
+                    if(!this.moveTile[i].canGo){
+                        for(let j=0;j<64;++j) this.moveTile[j].canGo = false;
+                        this.mode = 'base';
+                        this.tile[this.activeY][this.activeX].activate =false;
+                        return;
+                    }
+                    let y = Math.floor(i/8);
+                    let x = i%8;
+                    let t = null;
+                    for(let i=0;i<this.canGoList.length;++i) {
+                        if(this.canGoList[i].y == y && this.canGoList[i].x == x) t = this.canGoList[i];
+                    }
+                    // 갈 수 있는 곳을 클릭하면 
+                    // 1. catch 한 말이 있다면 그 말의 alive 를 false 로 바꾼다.
+                    if(t.catch){
+                        for(let i=0;i<this.unit.length;++i) if(this.unit[i].alive) if(this.unit[i].y == t.catch.y && this.unit[i].x == t.catch.x){
+                            this.unit[i].alive = false;
+                        } 
+                    }
+
+                    // 2. 현재 말을 그 위치로 이동시킨다.
+                    // ( 이동 한 unit 의 좌표와, lastmovedTurn 과 movedtime 을 변경 시킴)
+                    let u = null;
+                    for(let i=0;i<this.unit.length;++i) if(this.unit[i].alive){
+                        if(this.unit[i].y == this.activeY && this.unit[i].x == this.activeX) u = this.unit[i];
+                    }
+                    u.y = y;
+                    u.x = x;
+                    u.lastmovedTurn = this.turnCounter;
+                    u.movedtime += 1;
+
+                    // 만약 방금 이동 한 유닛이 Pawn 이고
+                    // 상대의 마지막 줄에 도달 했다면 승급을 한다.
+                    if(u.name == "Pawn" && (u.team && u.y == 7) || (!u.team && u.y == 0)){
+                        for(let j=0;j<5;++j){
+                            let np = prompt('어떤 유닛으로 승급?');
+                            if(np == 'Queen' || np == 'Rook' || np == 'Bishop' || np == 'Knight'){
+                                u.name = np;
+                                break;
+                            }
+                            else
+                                alert('Queen, Rook, Bishop, Knight 중 하나로만 승급 가능');
+                        }
+                    }
+                    
+                    // 3. turn 을 바꾼다.
+                    this.turn = (this.turn+1)%2;
+
+                    // 4. mode 를 다시 base 로
+                    for(let j=0;j<64;++j) this.moveTile[j].canGo = false;
+                    this.mode = 'base';
+                    this.tile[this.activeY][this.activeX].activate =false;
+                    this.turnCounter += 1;
+                },
+
+                undo(){
+                    if(this.undoStack.length===0){
+                        console.log("더 이상 뒤로 갈 수 없습니다.");
+                        return;
+                    }
+
+                },
+                redo(){
+                    if(this.redoStack.length===0){
+                        console.log("더 이상 앞으로 갈 수 없습니다.");
+                        return;
+                    }
+                }
+            },
+        });
+    </script>
+
+</html>
